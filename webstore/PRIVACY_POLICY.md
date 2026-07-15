@@ -24,4 +24,4 @@ Records remain on the user’s device until the user removes them or clears exte
 
 ## Contact
 
-For privacy and support questions, contact framessab@gmai.com.
+For privacy and support questions, contact framessab@gmail.com.

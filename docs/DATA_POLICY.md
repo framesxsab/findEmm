@@ -8,4 +8,4 @@ Forbidden: authentication-gated scraping, CAPTCHA bypass, paywall bypass, creden
 
 To delete data, remove a record from the extension or clear the extension's local storage from Chrome. The local server keeps batches in memory only; restart it to discard them.
 
-For privacy questions, contact framessab@gmai.com.
+For privacy questions, contact framessab@gmail.com.
