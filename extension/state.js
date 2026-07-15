@@ -1,0 +1,13 @@
+(function (root, factory) { const api = factory(); if (typeof module !== 'undefined') module.exports = api; root.FindEmmState = api; }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  function createRecord(prospect, contacts) { return { id: crypto.randomUUID(), prospect, contacts: Array.isArray(contacts) ? contacts : [], saved: false, list: 'Saved prospects', sequence: [], note: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }; }
+  function queueDraft(sequence) { const next = Array.isArray(sequence) ? sequence.slice() : []; next.push({ id: crypto.randomUUID(), kind: 'draft_outreach', dueAt: new Date().toISOString(), status: 'queued' }); return next; }
+  function csvCell(value) { return `"${String(value ?? '').replace(/"/g, '""')}"`; }
+  function toCsv(record) { const columns = ['name', 'company', 'title', 'list', 'contact', 'contact_type', 'status', 'confidence', 'source_url', 'retrieved_at']; const rows = record.contacts.length ? record.contacts : [{}]; return [columns.join(','), ...rows.map((contact) => [record.prospect.name, record.prospect.company, record.prospect.title, record.list, contact.value, contact.contactType, contact.status, contact.confidence, contact.sourceUrl, contact.retrievedAt].map(csvCell).join(','))].join('\n'); }
+  function bytesToBase64(bytes) { let binary = ''; bytes.forEach((byte) => { binary += String.fromCharCode(byte); }); return btoa(binary); }
+  function base64ToBytes(value) { return Uint8Array.from(atob(value), (char) => char.charCodeAt(0)); }
+  async function keyFor(passphrase, salt) { return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: base64ToBytes(salt), iterations: 250000, hash: 'SHA-256' }, await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']), { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']); }
+  function newSalt() { return bytesToBase64(crypto.getRandomValues(new Uint8Array(16))); }
+  async function seal(value, passphrase, salt) { const iv = crypto.getRandomValues(new Uint8Array(12)); const key = await keyFor(passphrase, salt); const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(value))); return { iv: bytesToBase64(iv), cipher: bytesToBase64(new Uint8Array(cipher)) }; }
+  async function open(sealed, passphrase, salt) { const key = await keyFor(passphrase, salt); const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToBytes(sealed.iv) }, key, base64ToBytes(sealed.cipher)); return JSON.parse(new TextDecoder().decode(plain)); }
+  return { createRecord, queueDraft, toCsv, newSalt, seal, open };
+}));

@@ -1,0 +1,14 @@
+{
+  "name": "findemm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first, evidence-based recruiter enrichment for Chrome.",
+  "scripts": {
+    "start:server": "node server/index.js",
+    "test": "node --test",
+    "build": "node scripts/build.js",
+    "package:store": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-store.ps1",
+    "check": "node --check server/index.js && node --check extension/state.js && node --check extension/popup.js && node --check extension/background.js"
+  },
+  "license": "Apache-2.0"
+}

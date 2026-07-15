@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>findEmm</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">f</span><div><strong>findEmm</strong><small>Recruiter Command Deck</small></div></div>
+      <button class="quiet-button" id="capture" type="button">Capture page</button>
+    </header>
+
+    <nav class="mode-tabs" aria-label="findEmm modes">
+      <button class="tab is-active" type="button" data-view="record">Person</button>
+      <button class="tab" type="button" data-view="research">Research</button>
+    </nav>
+
+    <section id="record-view" class="view">
+      <div id="empty-record" class="empty-state">
+        <p class="eyebrow">Local prospect record</p>
+        <h1>Start with a person, not a database.</h1>
+        <p>Research permitted sources, then save the evidence-backed record to a local list.</p>
+        <button class="primary-button" type="button" data-view="research">Research a prospect</button>
+      </div>
+
+      <article id="record-card" class="record-card" hidden>
+        <section class="identity-block">
+          <div class="initials" id="initials">PS</div>
+          <div><h1 id="record-name">Priya Shah</h1><p id="record-title">Talent Lead</p><p class="company" id="record-company">Northstar Labs</p></div>
+        </section>
+        <div class="identity-meta"><span id="record-domain">No company domain</span><span id="record-count">0 contacts</span></div>
+
+        <section class="action-panel" aria-label="Recruiter actions">
+          <p class="eyebrow">Next best action</p>
+          <div class="action-row"><div><strong id="save-label">Save to local list</strong><small>Only this Chrome profile can see it.</small></div><button class="primary-button" id="save-record" type="button">Save record</button></div>
+          <div class="action-row"><div><strong>Draft outreach</strong><small>Creates an editable email draft. Never sends automatically.</small></div><button class="secondary-button" id="draft-outreach" type="button">Open composer</button></div>
+          <div class="action-row"><div><strong>Follow-up queue</strong><small id="sequence-copy">Keep the next step local until you act.</small></div><button class="secondary-button" id="queue-followup" type="button">Queue draft</button></div>
+        </section>
+
+        <section class="contact-section">
+          <div class="section-heading"><div><p class="eyebrow">Contact &amp; signals</p><h2>Evidence-backed contacts</h2></div><button class="text-button" id="export-record" type="button">Export CSV</button></div>
+          <div class="contact-columns"><span>Contact</span><span>Source</span></div>
+          <div id="contacts" class="contact-list"></div>
+          <p id="no-contacts" class="muted">No permitted contact details found yet.</p>
+        </section>
+
+        <section class="list-panel">
+          <label for="list-select">Local list</label>
+          <div><select id="list-select"><option value="Saved prospects">Saved prospects</option><option value="Follow up">Follow up</option><option value="Do not contact">Do not contact</option></select><button class="secondary-button" id="move-list" type="button">Move</button></div>
+          <small id="list-copy">Not yet saved to a list.</small>
+        </section>
+
+        <details class="details-panel" id="details-panel">
+          <summary>Notes and record fields</summary>
+          <label for="record-note">Recruiter note</label>
+          <textarea id="record-note" rows="3" placeholder="Why this person is relevant, context from a conversation, or a follow-up reminder."></textarea>
+          <button class="secondary-button" id="save-note" type="button">Save note</button>
+          <dl><div><dt>Source policy</dt><dd>Permitted public pages, imports, and authorized providers only.</dd></div><div><dt>Storage</dt><dd>Local to this Chrome profile.</dd></div></dl>
+        </details>
+      </article>
+    </section>
+
+    <section id="research-view" class="view" hidden>
+      <p class="eyebrow">Research</p><h1>Find a prospect responsibly.</h1><p class="intro">Use permitted public/company data or details you already have. Pattern candidates are never verified.</p>
+      <form id="prospect-form">
+        <label>Name<input id="name" required autocomplete="name" placeholder="Ada Lovelace"></label>
+        <label>Company<input id="company" autocomplete="organization" placeholder="Example Inc"></label>
+        <label>Title<input id="title" autocomplete="organization-title" placeholder="Recruiter"></label>
+        <label>Company domain<input id="domain" inputmode="url" placeholder="example.com"></label>
+        <label>Profile URL<input id="profileUrl" inputmode="url" placeholder="https://example.com/team/ada"></label>
+        <details><summary>Recruiter-provided contact details</summary><label>Work email<input id="importedEmail" inputmode="email" placeholder="ada@example.com"></label><label>Business phone<input id="importedPhone" inputmode="tel" placeholder="+1 555 0100"></label></details>
+        <button class="primary-button full-width" type="submit">Research permitted sources</button>
+      </form>
+      <div id="status" role="status" aria-live="polite"></div>
+      <details class="settings" open><summary>Secure local vault</summary><p class="vault-copy">Set a passphrase to encrypt saved records and the pairing token on this device. It is never sent to findEmm.</p><label>Vault passphrase<input id="vault-passphrase" type="password" autocomplete="new-password"></label><label>Local API pairing token<input id="token" type="password" autocomplete="off"></label><div><button class="secondary-button" id="unlock-vault" type="button">Unlock vault</button><button class="text-button" id="health" type="button">Check server</button></div><button class="text-button" id="clear-vault" type="button">Clear encrypted vault from this device</button><p id="vault-status" class="muted">Vault is locked.</p></details>
+    </section>
+    <footer><span>Local-only workspace</span><span>Evidence shown with every contact</span></footer>
+  </main>
+  <dialog id="consent-dialog"><form method="dialog"><p class="eyebrow">Before you start</p><h2>Your research stays under your control.</h2><p>findEmm processes the page details you choose to capture plus prospect contact data you enter or retrieve from permitted sources. It stores saved records locally in an encrypted vault and sends only your requested lookup data to your configured local API or authorized provider.</p><label class="consent-check"><input id="consent-check" type="checkbox"> I understand and will use permitted sources and lawful outreach practices.</label><button class="primary-button full-width" id="accept-consent" value="accept" type="submit" disabled>Continue</button><p class="muted">No data is sold, used for ads, or sent to a findEmm-operated cloud service.</p></form></dialog>
+  <script src="state.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
