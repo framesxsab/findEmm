@@ -2,15 +2,37 @@
 
 ## Recruiter workflow
 
-- A recruiter can capture a page or enter prospect details, run permitted-source research, and land on a person record.
+- Capture runs only after the recruiter clicks Capture on a supported active LinkedIn profile or company page. It reads only visible name, title, company, and profile URL fields when available, never infers a company domain or captures contacts, and requires review before the separate Research action.
+- A recruiter can use reviewed captured fields or manual prospect details, run configured-source research, and land on a person record.
 - The record presents every contact with value, type, status, source/evidence link when available, retrieval date, confidence, and plain-language reason.
-- `Publicly found`, `Recruiter imported`, `Provider verified`, and `Pattern candidate — not verified` have distinct visible treatments. A pattern candidate cannot be used by the outreach draft action.
-- A recruiter can save a record, move it among local lists, save a note, queue a draft-only follow-up, export the record as CSV, and open a mail client draft for a sourced work email.
-- Saving, notes, lists, and follow-up queue state stay in Chrome local storage. The product never sends email or automatically contacts a prospect.
+- Company-page contacts are marked company-level, retain a source excerpt, and are never treated as person-specific draft addresses.
+- Public company channels, recruiter-supplied contacts, fresh provider-valid mailboxes, stale/unverified provider candidates, shared candidates, and locally confirmed person matches have distinct visible treatments.
+- Hunter mailbox validity is never presented as proof of person ownership. A `valid` result is fresh only when its provider verification date is no more than 90 days old; missing, future, or older dates display an unverified or stale state.
+- No email is draftable until the recruiter explicitly confirms the person match locally. Company channels cannot be confirmed as person matches. The resulting label states that confirmation is a local recruiter attestation, not proof of consent.
+- A recruiter can save a record, move it among local lists, save a note, queue a draft-only follow-up, export the record as CSV, and open a mail client draft only for a locally confirmed work email.
+- A person record recommends up to three relevant saved recruiting contacts using local company/domain, title, seniority, decision-maker, and former-company successor signals; it explains each match and excludes `Do not contact` records.
+- Repeated saves of the same profile update one record and preserve existing contacts, notes, list placement, and queued follow-ups.
+- When repeat profile research shows a changed title, company, or domain, the prior employment snapshot stays visible on the local record.
+- Moving a record to `Do not contact` disables draft and follow-up actions and keeps it out of recommendations.
+- The Shortlist view searches and filters saved people, shows active/follow-up/Do-not-contact counts plus queued-draft and role-change context, and opens a selected local record.
+- A recruiter can confirm deletion of one saved record without clearing unrelated records, or separately clear the entire encrypted vault.
+- A recruiter can export exactly one selected local list as a passphrase-protected handoff file. Unrelated opt-out identities, local API pairing tokens, notes, and queued drafts are excluded.
+- Import decrypts and validates the file, then shows additions, exact-profile merges, ambiguous conflicts, suppressions, and removed contacts before any write. The recruiter must explicitly confirm the merge.
+- Exact matching profile URLs deduplicate. Ambiguous name-and-company matches remain conflicts, imported IDs are regenerated, and existing local `Do not contact` state wins while contact fields and queued outreach are removed.
+- Imported provider-valid, recruiter-confirmed, recruiter-supplied, and other person-specific claims become `Shared contact — recheck required`; a new local confirmation is required before drafting.
+- Saving, notes, lists, shortlist state, and follow-up queue state stay in Chrome local storage. The product never sends email or automatically contacts a prospect.
 
 ## Safety and release gates
 
 - The local API accepts only an authenticated pairing token and listens on `127.0.0.1`.
-- Company-page lookup is robots-aware, throttled, unauthenticated, and limited to supplied domains. Source restrictions, breach data, and personal-contact guessing are out of scope.
+- Company-page lookup is off by default. Enabling it requires explicit operator approval and an exact-domain allowlist; requests are robots-aware, host-spaced, unauthenticated, HTTPS-only, and response-capped. Source restrictions, breach data, generated person-email guesses, and personal-phone guessing are out of scope.
+- Hunter Email Finder is off by default, requires a user-owned key plus explicit confirmation of written commercial approval, sends the key only in a header, caches in memory, and rate-gates calls below provider limits.
+- Every Hunter route requires a full name and company domain locally; handle requests still persist both keyed handle and name/domain suppression aliases, and Capture does not infer the missing domain.
+- Hunter `valid` plus a verification date within 90 days receives `Provider-valid mailbox — identity unconfirmed`; `accept_all`, `unknown`, missing dates, future dates, and stale dates remain non-draftable candidates.
+- A provider `451` or stored person match returns no contact, stores only keyed HMAC aliases, blocks future matching provider access, and purges matching cleartext local identity, contacts, and queued outreach. A blocked domain stores only a keyed domain HMAC and blocks later provider access for that domain. Corrupt or unavailable suppression storage disables Hunter rather than bypassing the safeguard.
+- The local server retains at most 20 transient batches. Each batch expires after one hour, restart, or earlier capacity eviction.
+- Handoff imports are capped at 5 MB and 1,000 sanitized records. A wrong passphrase, changed file, unsupported version, or invalid payload fails without changing the local vault.
+- Handoff UI states that only the selected list is exported and that the feature provides encrypted files, not hosted sync, user identity, role-based access control, revocation, audit logging, or sender verification; it warns users to transfer the file and passphrase separately and delete the downloaded file when finished.
 - `npm test`, `npm run check`, `npm run build`, MV3 manifest validation, and authenticated local API smoke tests must pass.
-- Browser visual verification is required for final release signoff; if a Chrome automation surface is unavailable, that gap must be reported rather than claimed as completed.
+- A real Chrome smoke covers consent, clicked capture and review, Hunter-disabled behavior, local confirmation before draft, shortlist search/filter/open/delete, handoff downgrade, and opt-out purge without real personal data.
+- Browser visual verification is required for final release signoff; if a Chrome automation surface is unavailable, that gap must remain reported rather than claimed as completed.

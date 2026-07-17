@@ -15,8 +15,10 @@
 
     <nav class="mode-tabs" aria-label="findEmm modes">
       <button class="tab is-active" type="button" data-view="record">Person</button>
+      <button class="tab" type="button" data-view="shortlist">Shortlist</button>
       <button class="tab" type="button" data-view="research">Research</button>
     </nav>
+    <div id="status" role="status" aria-live="polite"></div>
 
     <section id="record-view" class="view">
       <div id="empty-record" class="empty-state">
@@ -47,6 +49,12 @@
           <p id="no-contacts" class="muted">No permitted contact details found yet.</p>
         </section>
 
+        <section class="recommendation-section">
+          <div class="section-heading"><div><p class="eyebrow">Local recommendations</p><h2>Related recruiting contacts</h2></div></div>
+          <div id="recommendations"></div>
+          <p id="no-recommendations" class="muted">No relevant saved contacts yet. Research and save more people to build local recommendations.</p>
+        </section>
+
         <section class="list-panel">
           <label for="list-select">Local list</label>
           <div><select id="list-select"><option value="Saved prospects">Saved prospects</option><option value="Follow up">Follow up</option><option value="Do not contact">Do not contact</option></select><button class="secondary-button" id="move-list" type="button">Move</button></div>
@@ -58,28 +66,40 @@
           <label for="record-note">Recruiter note</label>
           <textarea id="record-note" rows="3" placeholder="Why this person is relevant, context from a conversation, or a follow-up reminder."></textarea>
           <button class="secondary-button" id="save-note" type="button">Save note</button>
-          <dl><div><dt>Source policy</dt><dd>Permitted public pages, imports, and authorized providers only.</dd></div><div><dt>Storage</dt><dd>Local to this Chrome profile.</dd></div></dl>
+          <dl><div><dt>Source policy</dt><dd>Permitted public pages, imports, and authorized providers only.</dd></div><div><dt>Storage</dt><dd>Local to this Chrome profile.</dd></div><div id="employment-history-panel" hidden><dt>Previous employment snapshots</dt><dd id="employment-history"></dd></div></dl>
+          <button class="danger-button" id="delete-record" type="button">Delete local record</button>
         </details>
       </article>
     </section>
 
+    <section id="shortlist-view" class="view" hidden>
+      <div class="section-heading"><div><p class="eyebrow">Encrypted local workspace</p><h1>Placement shortlist</h1></div><button class="quiet-button" type="button" data-view="research">Add person</button></div>
+      <p class="intro">Search saved people, review follow-ups and role changes, then open the right recruiter without repeating work.</p>
+      <div class="shortlist-stats" aria-label="Shortlist counts"><button type="button" data-shortlist-filter="Active"><strong id="count-active">0</strong><span>Active</span></button><button type="button" data-shortlist-filter="Follow up"><strong id="count-followup">0</strong><span>Follow up</span></button><button type="button" data-shortlist-filter="Do not contact"><strong id="count-dnc">0</strong><span>Do not contact</span></button></div>
+      <div class="shortlist-controls"><label for="shortlist-search">Search people or companies<input id="shortlist-search" type="search" autocomplete="off" placeholder="Name, title, company, domain"></label><label for="shortlist-filter">List<select id="shortlist-filter"><option value="Active">Active</option><option value="Saved prospects">Saved prospects</option><option value="Follow up">Follow up</option><option value="Do not contact">Do not contact</option><option value="All">All saved</option></select></label></div>
+      <p id="shortlist-summary" class="muted">Unlock the local vault to view saved records.</p>
+      <div id="shortlist-records" class="shortlist-records"></div>
+      <p id="no-shortlist" class="muted">No records match this view.</p>
+      <details class="settings"><summary>Encrypted team handoff</summary><p class="handoff-warning">Passphrase-protected file only—not hosted sync, team accounts, or sender verification. Pairing token, notes, queued drafts, and unrelated opt-out identities are excluded.</p><label for="handoff-list">List to export</label><select id="handoff-list"><option value="Saved prospects">Saved prospects</option><option value="Follow up">Follow up</option><option value="Do not contact">Do not contact</option></select><label for="share-passphrase">Share passphrase (12+ characters)</label><input id="share-passphrase" type="password" minlength="12" autocomplete="new-password"><div class="handoff-actions"><button class="secondary-button" id="export-handoff" type="button">Export file</button><button class="secondary-button" id="choose-handoff" type="button">Choose file</button><input id="import-handoff" type="file" accept=".findemm,application/json" hidden></div><p class="muted">Only the chosen list is exported. Explicitly choose Do not contact to share that list; a recipient’s existing opt-outs always win. Send file and passphrase separately, then delete the file.</p><p id="handoff-preview" class="handoff-preview" aria-live="polite">No handoff previewed.</p><button class="primary-button full-width" id="merge-handoff" type="button" disabled>Confirm merge</button></details>
+    </section>
+
     <section id="research-view" class="view" hidden>
-      <p class="eyebrow">Research</p><h1>Find a prospect responsibly.</h1><p class="intro">Use permitted public/company data or details you already have. Pattern candidates are never verified.</p>
+      <p class="eyebrow">Research</p><h1>Find a prospect responsibly.</h1><p class="intro">Use permitted public/company data or details you already have. findEmm does not invent personal email addresses or phone numbers.</p>
       <form id="prospect-form">
         <label>Name<input id="name" required autocomplete="name" placeholder="Ada Lovelace"></label>
         <label>Company<input id="company" autocomplete="organization" placeholder="Example Inc"></label>
         <label>Title<input id="title" autocomplete="organization-title" placeholder="Recruiter"></label>
-        <label>Company domain<input id="domain" inputmode="url" placeholder="example.com"></label>
+        <label>Company domain (required for optional Hunter)<input id="domain" inputmode="url" placeholder="example.com"></label>
         <label>Profile URL<input id="profileUrl" inputmode="url" placeholder="https://example.com/team/ada"></label>
-        <details><summary>Recruiter-provided contact details</summary><label>Work email<input id="importedEmail" inputmode="email" placeholder="ada@example.com"></label><label>Business phone<input id="importedPhone" inputmode="tel" placeholder="+1 555 0100"></label></details>
+        <details><summary>Recruiter-provided contact details</summary><label>Work email<input id="importedEmail" type="email" inputmode="email" placeholder="ada@example.com"></label><label>Business phone<input id="importedPhone" type="tel" inputmode="tel" placeholder="+1 555 0100"></label></details>
         <button class="primary-button full-width" type="submit">Research permitted sources</button>
       </form>
-      <div id="status" role="status" aria-live="polite"></div>
       <details class="settings" open><summary>Secure local vault</summary><p class="vault-copy">Set a passphrase to encrypt saved records and the pairing token on this device. It is never sent to findEmm.</p><label>Vault passphrase<input id="vault-passphrase" type="password" autocomplete="new-password"></label><label>Local API pairing token<input id="token" type="password" autocomplete="off"></label><div><button class="secondary-button" id="unlock-vault" type="button">Unlock vault</button><button class="text-button" id="health" type="button">Check server</button></div><button class="text-button" id="clear-vault" type="button">Clear encrypted vault from this device</button><p id="vault-status" class="muted">Vault is locked.</p></details>
     </section>
-    <footer><span>Local-only workspace</span><span>Evidence shown with every contact</span></footer>
+    <footer><span>Encrypted local workspace</span><span>Evidence shown with every contact</span></footer>
   </main>
-  <dialog id="consent-dialog"><form method="dialog"><p class="eyebrow">Before you start</p><h2>Your research stays under your control.</h2><p>findEmm processes the page details you choose to capture plus prospect contact data you enter or retrieve from permitted sources. It stores saved records locally in an encrypted vault and sends only your requested lookup data to your configured local API or authorized provider.</p><label class="consent-check"><input id="consent-check" type="checkbox"> I understand and will use permitted sources and lawful outreach practices.</label><button class="primary-button full-width" id="accept-consent" value="accept" type="submit" disabled>Continue</button><p class="muted">No data is sold, used for ads, or sent to a findEmm-operated cloud service.</p></form></dialog>
+  <dialog id="consent-dialog"><form method="dialog"><p class="eyebrow">Before you start</p><h2>Choose what findEmm may process.</h2><p>When you click Capture, findEmm reads the visible name, title, company, and profile URL from the current LinkedIn profile or company page. Nothing is captured in the background, and you review every field.</p><p>When you click Research, those fields plus any work contact you entered go to the local API on this device. If its operator enabled Hunter Email Finder, the API sends either the LinkedIn profile handle or the person’s name and company domain to Hunter. Hunter is optional and off by default. A full name and company domain are required locally for every Hunter route so later opt-outs match both lookup forms.</p><p>If the operator explicitly enabled allowlisted company-page lookup, the local API may request only that approved company domain’s public contact page.</p><label class="consent-check"><input id="consent-check" type="checkbox"> I agree to this local processing and optional provider/company-page requests, and I will use lawful sources and outreach practices.</label><button class="primary-button full-width" id="accept-consent" value="accept" type="submit" disabled>Continue</button><p class="muted">No data is sold, used for ads, or sent to a findEmm-operated cloud service.</p></form></dialog>
+  <script src="capture.js"></script>
   <script src="state.js"></script>
   <script src="popup.js"></script>
 </body>
