@@ -1,21 +1,30 @@
-# Contributing
+# Contributing to findEmm
 
-Keep findEmm local-first and evidence-based. New sources must document their permission basis, terms/robots behavior, rate limit, evidence mapping, retention, opt-out behavior, and tests. Do not add login scraping, background LinkedIn collection, automated navigation, CAPTCHA/payload bypasses, breach datasets, generated person-email guesses, personal-phone guessing, or claims of identity verification from mailbox validation.
+Thanks for contributing. findEmm is a local-first recruiter research tool, so changes must preserve user control, data minimization, and responsible use.
 
-Active-page capture must remain click-triggered and limited to allowlisted visible fields. The recruiter reviews captured values before Research; capture must not infer a company domain, extract contacts from LinkedIn, or run as a persistent content script.
+## Before you start
 
-Recruiter CSV intake must remain local, explicit, and preview-first. Keep the 1 MB/1,000-row caps, allowlisted schema, strict explicit work-email/business-phone/domain/LinkedIn-person-URL validation, non-draftable `recruiter_imported` status, record-level file/row provenance, and one confirmed encrypted-vault write for eligible additions. Import must never automatically call Hunter or company pages. It must screen every person against the local HMAC suppression store using a LinkedIn handle or full-name/domain alias, immediately purge only the local identity aliases that actually matched, preserve stronger local contact claims, keep local `Do not contact` sticky, and block an ambiguous incoming DNC rather than silently applying it to the wrong person. Do not accept generic, personal, private, home, mobile, cell, WhatsApp, or otherwise ambiguous email/phone columns.
+1. Open an issue or discussion for substantial changes.
+2. Keep pull requests focused and explain the user-facing outcome.
+3. Do not include real contact data, pairing tokens, exports, API keys, or files from `server/data/`.
 
-Provider keys belong only in the local server process environment. Never enable Hunter in this product without written commercial approval, never place provider keys in extension storage or URLs, and treat provider `451` responses as opt-outs. A provider-valid mailbox remains identity-unconfirmed, expires to stale after 90 days, and cannot enable drafting until a recruiter explicitly confirms the person match locally.
+## Development checks
 
-Durable provider suppression must remain fail-closed and HMAC-only: store no plaintext identity or contact values, check suppression before enrichment and again after asynchronous enrichment before releasing a result or batch, and purge matching cleartext records and queued outreach after an opt-out. Never return, confirm, draft, or export a person-specific contact without a canonical LinkedIn `/in/` alias or full name plus canonical company domain; keep active legacy records quarantined until Research repairs that identity. Company-page fetching must remain off unless both explicit approval and an exact-domain allowlist are configured.
+Run these before opening a pull request:
 
-Keep team handoffs minimal and fail-closed: export only the chosen list and allowlisted fields, never unrelated opt-out identities, the pairing token, notes, or queued drafts; authenticate the versioned envelope; suppression-screen before preview and again at confirmation; immediately purge alias-specific provider matches; exclude active records that have no durable suppression alias; make any unresolved incoming DNC a blocking conflict for the whole merge; preview eligible additions before one confirmed write; regenerate imported IDs; merge only exact LinkedIn person URLs with consistent names; downgrade shared identity/provider claims; and preserve any existing local `Do not contact` state, including first-name + last-name + domain middle-name/profile variants. Do not describe file handoff as hosted sync, identity, access control, revocation, audit, or sender verification.
+```powershell
+npm test
+npm run check
+npm run build
+```
 
-All encrypted-vault writes and full-vault deletion must go through the background worker's serialized revision check. A stale popup must abort rather than overwrite a newer vault. Unlock must suppression-screen all saved records in bounded batches before enabling Research, outreach, or export; a failed screen or purge persistence must leave the popup quarantined.
+## Project boundaries
 
-Suppression screens are point-in-time checks, not a transaction with Chrome storage. Keep confirmation-time, post-write, and unlock-time screens; record valid matched signals before preview-freshness checks; block matching actions and handoff export while a purge is pending; rollback additions when the final screen fails; immediately reconcile new matches; and never describe the remaining cross-store interval as fully closed. Ordinary save and Research preflight must fail closed on exact DNC identities and first-name + last-name + domain DNC variants.
+- Keep capture user-triggered and limited to visible fields on supported pages.
+- Do not add login scraping, CAPTCHA bypasses, background collection, breach data, or generated contact guesses.
+- Do not add automatic email sending or claims that mailbox validity proves a person’s identity.
+- Use only authorized sources and retain clear source evidence for any new integration.
+- Keep optional providers disabled by default and preserve opt-out handling.
+- Keep user data local unless a feature clearly explains and obtains consent for a transfer.
 
-Keep transient batches memory-only, capped at 20, and expired after one hour or server restart. Preserve shortlist search/filter behavior and confirmed single-record deletion without adding a hosted database.
-
-Before a pull request run `npm test`, `npm run check`, and `npm run build`. Exercise clicked capture, CSV preview/confirm/suppression screening, local confirmation, opt-out purge, shortlist deletion, and handoff downgrade paths. Browser visual verification remains a separate release gate. Do not commit `server/data/`, pairing tokens, suppression files, exports, or contact details.
+For policy details, see the [data policy](docs/DATA_POLICY.md). Please report security issues privately rather than in a public issue; see [SECURITY.md](SECURITY.md).
