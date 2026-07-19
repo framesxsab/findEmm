@@ -14,6 +14,7 @@ Selected visual direction: Option 2, Recruiter Command Deck. Current source pres
 - Vault copy explains unlock-time opt-out reconciliation; active records without a durable suppression identity visibly remain quarantined from contact/export while Research can repair them.
 - Handoff copy says only the chosen list is exported, import requires local suppression screening, active uncheckable identities are excluded, unresolved incoming DNC conflicts block the merge, and shared person claims require local recheck.
 - The three view controls use named ARIA tabs/panels with roving focus and Left/Right/Home/End keyboard navigation; keyboard-focus styles and reduced-motion handling are present in source.
+- Research prevents duplicate submits while a permitted-source request is in progress, announces that state, and restores the control on every result or failure path.
 
 Static source inspection does not prove rendered layout, focus order, clipping, browser APIs, dialogs, or destructive-action behavior.
 

@@ -70,6 +70,10 @@ test('popup and background enforce suppression-screened imports with revision-ch
   const researchSnapshot = popup.indexOf('assertVaultSnapshot(researchVault, researchRevision)', researchRequest);
   const researchRender = popup.indexOf('renderRecord(recordFrom(normalizedResult, results))', researchSnapshot);
   assert.ok(researchRequest >= 0 && researchRequest < researchSnapshot && researchSnapshot < researchRender, 'Research must discard a result when the vault changes in flight');
+  assert.match(popup, /researchInProgress/);
+  assert.match(popup, /researchButton\.disabled = true/);
+  assert.match(popup, /researchButton\.disabled = false/);
+  assert.match(popup, /researchButton\.setAttribute\('aria-busy', 'true'\)/);
   assert.match(background, /findemm-vault-cas/);
   assert.match(background, /expectedRevision/);
 });

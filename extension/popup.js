@@ -11,6 +11,7 @@ let vaultRevision = 0;
 let pendingVaultRevision = null;
 let vaultStale = false;
 let previewGeneration = 0;
+let researchInProgress = false;
 const sessionSuppressionSignals = [];
 
 function vaultDefault() { return { token: '', records: [], selectedRecordId: '' }; }
@@ -493,6 +494,7 @@ $('unlock-vault').addEventListener('click', async () => { try { await unlockVaul
 $('clear-vault').addEventListener('click', async () => { if (!confirm('Delete all encrypted findEmm records and the saved local API token from this Chrome profile? This cannot be undone.')) return; const baseVault = vault; try { clearPendingPreviews(); await removeVaultStorage(baseVault); vault = null; passphrase = ''; current = null; clearResearchForm(); $('vault-passphrase').value = ''; $('token').value = ''; $('share-passphrase').value = ''; $('vault-status').textContent = 'Encrypted vault deleted from this device.'; $('record-card').hidden = true; $('empty-record').hidden = false; renderShortlist(); switchView('record'); } catch (error) { $('vault-status').textContent = `Vault not deleted: ${error.message}`; } });
 $('prospect-form').addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (researchInProgress) { $('status').textContent = 'Research is already running. Wait for the current result before starting another request.'; return; }
   let prospect;
   try { prospect = FindEmmState.normalizeResearchProspect(formProspect()); }
   catch (error) { $('status').textContent = error.message; return; }
@@ -502,6 +504,10 @@ $('prospect-form').addEventListener('submit', async (event) => {
   if (isSessionSuppressed(prospect)) { $('status').textContent = 'Provider opt-out is active in this popup session. Research and outreach are blocked even though the encrypted-vault purge still needs attention.'; return; }
   const researchVault = vault;
   const researchRevision = vaultRevision;
+  const researchButton = $('prospect-form').querySelector('button[type="submit"]');
+  researchInProgress = true;
+  researchButton.disabled = true;
+  researchButton.setAttribute('aria-busy', 'true');
   $('status').textContent = 'Researching permitted sources…';
   try {
     const data = await request('/v1/enrich', { method: 'POST', body: JSON.stringify({ prospect }) });
@@ -521,6 +527,11 @@ $('prospect-form').addEventListener('submit', async (event) => {
       try { await honorProviderOptOut(prospect); }
       catch (storageError) { vaultStale = true; clearPendingPreviews(); clearResearchForm(); if (current) renderRecord(current, false); renderShortlist(); $('status').textContent = `Provider opt-out was durably suppressed by the local API, but exact-alias vault reconciliation failed: ${storageError.message}. Unlock again before Research, outreach, or export.`; }
     } else $('status').textContent = error.message;
+  }
+  finally {
+    researchInProgress = false;
+    researchButton.disabled = false;
+    researchButton.removeAttribute('aria-busy');
   }
 });
 $('capture').addEventListener('click', async () => { clearResearchForm(); switchView('research'); try { const captured = await capturePage(); if (captured.kind === 'unsupported') { $('status').textContent = 'Capture supports LinkedIn profile and company pages. Enter details manually on other pages.'; return; } Object.entries(captured.prospect).forEach(([key, value]) => { if ($(key)) $(key).value = value; }); const kind = captured.kind === 'linkedin_profile' ? 'LinkedIn profile' : 'LinkedIn company'; const fields = captured.capturedFields.join(', '); $('status').textContent = `${kind} fields captured${fields ? `: ${fields}` : ''}. Review before Research; add company domain if optional Hunter is enabled.`; } catch { $('status').textContent = 'This page cannot be captured. Enter details manually.'; } });
