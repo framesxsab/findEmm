@@ -6,19 +6,20 @@ findEmm — Local Prospect Research
 
 ## Summary
 
-Click to capture visible recruiter-profile fields, review sourced contacts, and manage an encrypted local placement shortlist.
+Import recruiter-controlled contacts or click to capture visible profile fields, review evidence, and manage an encrypted local placement shortlist.
 
 ## Detailed description
 
-findEmm is a local-first prospect-research companion for placement and recruiting teams. Capture starts only when you click Capture on a supported active LinkedIn profile or company page. It reads visible name, title, company, and profile URL fields when available, then lets you review them before a separate Research request. It does not run in the background or extract contact details from LinkedIn.
+findEmm is a local-first prospect-research companion for placement and recruiting teams. Seed the encrypted shortlist from a recruiter-controlled CSV/ATS export, or click Capture on a supported active LinkedIn profile or company page. Capture reads visible name, title, company, and profile URL fields when available, then lets you review them before a separate Research request. It does not run in the background or extract contact details from LinkedIn.
 
 - Review every contact with its source, retrieval date, confidence, scope, and status.
-- Keep company channels, recruiter-supplied values, provider mailbox results, and shared claims clearly separate; never invent a person-specific email or phone number.
+- Preview a bounded recruiter CSV locally before confirming additions. Explicit work/business headers are required; generic or personal/mobile contact columns are rejected. A local HMAC suppression check excludes provider opt-outs and immediately deletes matching saved plaintext without calling Hunter or a website; first-name + last-name + domain DNC variants fail closed, and imported contacts remain identity-unchecked.
+- Keep company channels, recruiter-supplied values, provider mailbox results, and shared claims clearly separate; never invent a person-specific email or phone number. A person contact requires a canonical LinkedIn identity or full name plus company domain so opt-outs remain checkable.
 - Treat a fresh Hunter-valid mailbox as identity-unconfirmed; results become stale after 90 days.
 - Require a local recruiter confirmation of the person match before opening an editable email draft. findEmm never sends email automatically.
 - Save encrypted local records, notes, lists, role-change history, recommendations, and draft-only follow-up steps.
 - Search and filter a local placement shortlist, open saved records, or confirm deletion of one record.
-- Export exactly one selected list as a passphrase-protected handoff file and preview it before merging on another device. Pairing tokens, unrelated opt-out identities, notes, and queued drafts stay out of the file; shared identity claims require a new local check.
+- Export exactly one selected list as a passphrase-protected handoff file and preview it before merging on another device. Handoff imports use the same local suppression check and exclude active records without a durable suppression alias; an unresolved incoming DNC blocks the entire merge. Pairing tokens, unrelated opt-out identities, notes, and queued drafts stay out of the file; shared identity claims require a new local check. Export is blocked if the vault changes or an opt-out purge is pending while the handoff is encrypted.
 - Export record evidence as CSV.
 
 findEmm does not scrape in the background, automate signed-in navigation, bypass paywalls/CAPTCHAs/robots rules, use breach data, generate person-email guesses, guess personal phone numbers, sell contact data, or send outreach automatically.
@@ -29,7 +30,7 @@ Every Hunter route requires the full name and company domain locally so opt-outs
 
 Automated company-contact-page fetching is also off by default. It requires explicit operator approval plus an exact-domain allowlist and returns only company-level channels.
 
-Provider opt-outs are represented locally by keyed HMAC suppression values rather than plaintext identities; matching cleartext local records and queued outreach are purged. Encrypted handoff is a user-transferred file, not hosted sync. findEmm provides no user identity, role-based access control, revocation, audit logging, or sender verification. Send the file and passphrase separately and delete downloaded files when finished.
+Provider opt-outs are represented locally by keyed HMAC suppression values rather than plaintext identities; matching cleartext local records and queued outreach are purged, including when a CSV or handoff screen finds an existing match. The local API checks person suppression both before and after asynchronous enrichment, and each vault unlock reconciles saved records before enabling sensitive actions. Active legacy records without a durable alias remain quarantined from contact/export until repaired through Research. Encrypted handoff is a user-transferred file, not hosted sync. findEmm provides no user identity, role-based access control, revocation, audit logging, or sender verification. Send the file and passphrase separately and delete downloaded files when finished.
 
 ## Single purpose
 
@@ -46,7 +47,7 @@ Enable recruiter-directed, evidence-backed prospect research and encrypted local
 
 ## Privacy Practices dashboard answers
 
-- Handles: personal information, user-selected website content/page metadata, user-generated notes, authentication information for the local companion API, user-directed encrypted handoff files, and optional transmission of requested lookup fields to Hunter.
+- Handles: personal information from recruiter-selected CSV files, user-selected website content/page metadata, user-generated notes, authentication information for the local companion API, user-directed encrypted handoff files, and optional transmission of requested lookup fields to Hunter.
 - Purpose: only the extension's recruiter-research, safety, export, and local record-management features.
 - Sale/advertising: no.
 - Human review: no developer or publisher human review; the user reviews and confirms their own records.

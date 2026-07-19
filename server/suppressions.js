@@ -8,6 +8,39 @@ const HASH = /^[a-f0-9]{64}$/;
 const VERSION = 2;
 const VERIFIER_CONTEXT = 'findemm-suppression-store:v2';
 
+function linkedInHandle(profileUrl) {
+  try {
+    const url = new URL(profileUrl);
+    if (!['linkedin.com', 'www.linkedin.com'].includes(url.hostname.toLowerCase())) return '';
+    const handle = decodeURIComponent(url.pathname.match(/^\/in\/([^/]+)\/?$/i)?.[1] || '').normalize('NFKC').trim();
+    return handle && !/[\/\\\u0000-\u001f\u007f]/.test(handle) ? handle : '';
+  } catch { return ''; }
+}
+
+function prospectSuppressionKeys(prospect = {}) {
+  const handle = linkedInHandle(prospect.profileUrl);
+  const firstName = String(prospect.firstName || '').normalize('NFKC').trim().toLowerCase();
+  const lastName = String(prospect.lastName || '').normalize('NFKC').trim().toLowerCase();
+  const domain = String(prospect.domain || '').normalize('NFKC').trim().toLowerCase();
+  const linkedInKey = handle ? `linkedin:${handle.toLowerCase()}` : '';
+  const personKey = domain && firstName && lastName ? `person:${firstName}|${lastName}|${domain}` : '';
+  return { aliases: [linkedInKey, personKey].filter(Boolean), linkedInKey, personKey, domainKey: domain ? `domain:${domain}` : '' };
+}
+
+function screenProspectSuppressions(prospects, store) {
+  if (!Array.isArray(prospects) || prospects.length < 1 || prospects.length > 1000) throw new Error('Suppression screen requires 1–1,000 prospects.');
+  if (!store || typeof store.has !== 'function') throw new Error('Suppression storage is unavailable.');
+  const keys = prospects.map(prospectSuppressionKeys);
+  const allKeys = [...new Set(keys.flatMap(({ aliases, domainKey }) => [...aliases, domainKey].filter(Boolean)))];
+  const matched = new Set((typeof store.hasMany === 'function' ? store.hasMany(allKeys) : allKeys.map((key) => store.has(key))).flatMap((value, index) => value ? [allKeys[index]] : []));
+  return keys.map(({ aliases, linkedInKey, personKey, domainKey }, index) => {
+    const matchedLinkedIn = Boolean(linkedInKey && matched.has(linkedInKey));
+    const matchedPerson = Boolean(personKey && matched.has(personKey));
+    if (!aliases.length) return { index, checkable: false, suppressed: false, matchedLinkedIn, matchedPerson, blockedDomain: false };
+    return { index, checkable: true, suppressed: matchedLinkedIn || matchedPerson, matchedLinkedIn, matchedPerson, blockedDomain: Boolean(domainKey && matched.has(domainKey)) };
+  });
+}
+
 function normalize(key) {
   if (typeof key !== 'string') throw new TypeError('Suppression key must be a string.');
   const value = key.normalize('NFKC').trim().toLowerCase();
@@ -90,9 +123,10 @@ function createSuppressionStore({ filePath, secret } = {}) {
   }
   return {
     has(key) { return load().hashes.has(hash(key)); },
+    hasMany(keys) { const hashes = load().hashes; return (Array.isArray(keys) ? keys : []).map((key) => hashes.has(hash(key))); },
     add(key) { return addMany([key]) > 0; },
     addMany
   };
 }
 
-module.exports = { createSuppressionStore };
+module.exports = { createSuppressionStore, linkedInHandle, prospectSuppressionKeys, screenProspectSuppressions };

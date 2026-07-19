@@ -1,10 +1,7 @@
 const ENDPOINT = 'https://api.hunter.io/v2/email-finder';
 const CACHE_MS = 24 * 60 * 60 * 1000;
 const CALL_GAP_MS = 125;
-
-function linkedInHandle(profileUrl) {
-  try { const url = new URL(profileUrl); if (!['linkedin.com', 'www.linkedin.com'].includes(url.hostname.toLowerCase())) return ''; return decodeURIComponent(url.pathname.match(/^\/in\/([^/]+)\/?$/i)?.[1] || ''); } catch { return ''; }
-}
+const { linkedInHandle, prospectSuppressionKeys } = require('./suppressions');
 
 function publicUrl(value) { try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && url.toString().length <= 2048 ? url.toString() : ''; } catch { return ''; } }
 function professionalEmail(value) { const email = String(value || '').trim(); return email.length <= 320 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : ''; }
@@ -77,9 +74,7 @@ function createHunterAdapter({ apiKey = '', commercialApproval = false, suppress
     if (!enabled) return { contacts: [] };
     if (failedClosed) throw new Error('Hunter disabled because suppression storage is unavailable.');
     if (!prospect.domain || !prospect.firstName || !prospect.lastName) return { contacts: [] };
-    const handle = linkedInHandle(prospect.profileUrl);
-    const aliases = [handle && `linkedin:${handle.toLowerCase()}`, prospect.domain && prospect.firstName && prospect.lastName && `person:${prospect.firstName}|${prospect.lastName}|${prospect.domain}`].filter(Boolean);
-    const domainKey = prospect.domain ? `domain:${prospect.domain}` : '';
+    const { aliases, domainKey } = prospectSuppressionKeys(prospect);
     const key = aliases[0];
     const stored = suppressionStatus(aliases, domainKey);
     if (stored) return stored;

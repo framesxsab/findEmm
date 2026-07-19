@@ -1,12 +1,34 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createRecord, canContact, draftableEmail, confirmContact, upsertRecord, matchesProspect, purgeProspect, recommendRelated, workspaceRecords, queueDraft, toCsv, createHandoff, openHandoff, mergeImportedRecords } = require('../extension/state');
+const { createRecord, canContact, draftableEmail, confirmContact, upsertRecord, matchesProspect, hasDurableSuppressionAlias, normalizeResearchProspect, purgeProspect, purgeSuppressedProspects, recommendRelated, workspaceRecords, queueDraft, toCsv, parseRecruiterCsv, mergeRecruiterImport, createHandoff, openHandoff, mergeImportedRecords } = require('../extension/state');
 
 test('creates a local record with no implicit send state', () => {
   const record = createRecord({ name: 'Ada Lovelace', company: 'Example' }, []);
   assert.equal(record.saved, false);
   assert.deepEqual(record.sequence, []);
   assert.equal(record.list, 'Saved prospects');
+});
+
+test('normalizes the client Research identity before suppression screening', () => {
+  const normalized = normalizeResearchProspect({ name: '  Asha   Priya Rao  ', company: '  Example   Inc  ', title: ' Talent\n Lead ', domain: 'HTTPS://Example.COM/team', profileUrl: ' https://linkedin.com/in/asha ', importedEmail: ' asha@example.com ', importedPhone: ' +91 55555 0100 ' });
+  assert.deepEqual(normalized, { name: 'Asha Priya Rao', firstName: 'asha', lastName: 'rao', company: 'Example Inc', title: 'Talent Lead', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha', importedEmail: 'asha@example.com', importedPhone: '+91 55555 0100' });
+  assert.equal(hasDurableSuppressionAlias(normalized), true);
+  const domainless = normalizeResearchProspect({ name: 'Asha Rao' });
+  assert.equal(domainless.domain, '');
+  assert.equal(hasDurableSuppressionAlias(domainless), false);
+  assert.equal(normalizeResearchProspect({ name: 'Asha Rao', domain: 'https://' }).domain, '');
+  assert.throws(() => normalizeResearchProspect({ name: 'Asha Rao', domain: 'not a domain' }), /valid hostname/);
+  assert.throws(() => normalizeResearchProspect({ name: 'Asha Rao', importedEmail: 'not-an-email' }), /Work email must be valid/);
+  assert.throws(() => normalizeResearchProspect({ name: '   ' }), /Name is required/);
+});
+
+test('detects only identities the durable suppression screen can check', () => {
+  assert.equal(hasDurableSuppressionAlias({ name: 'Asha Rao', domain: 'HTTPS://Example.COM/team' }), true);
+  assert.equal(hasDurableSuppressionAlias({ name: 'Asha', profileUrl: 'https://www.linkedin.com/in/Asha-Rao/' }), true);
+  assert.equal(hasDurableSuppressionAlias({ name: 'Asha', domain: 'example.com' }), false);
+  assert.equal(hasDurableSuppressionAlias({ name: 'Asha Rao', domain: 'not a domain' }), false);
+  assert.equal(hasDurableSuppressionAlias({ name: 'Asha Rao', profileUrl: 'https://linkedin.com/company/example' }), false);
+  assert.equal(hasDurableSuppressionAlias({ name: 'Asha Rao', profileUrl: 'https://linkedin.com/in/asha%2Frao' }), false);
 });
 
 test('queues a draft-only follow-up locally', () => {
@@ -118,6 +140,51 @@ test('provider suppression clears previously saved contact data', () => {
   assert.equal(canContact(saved.record), false);
 });
 
+test('ordinary saves fail closed on first-last-domain DNC aliases in both directions', () => {
+  const localDnc = { ...createRecord({ name: 'Asha Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-one', importedEmail: 'old@example.com' }, [{ id: 'old', value: 'old@example.com' }]), saved: true, list: 'Do not contact', sequence: [{ status: 'queued' }] };
+  const activeVariant = { ...createRecord({ name: 'Asha Priya Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-two', importedEmail: 'new@example.com' }, [{ id: 'new', value: 'new@example.com' }]), saved: true, list: 'Follow up' };
+  const blocked = upsertRecord([localDnc], activeVariant);
+  assert.equal(blocked.suppressionAliasMatched, true);
+  assert.equal(blocked.records.length, 1);
+  assert.equal(blocked.record.id, localDnc.id);
+  assert.equal(blocked.record.prospect.name, 'Asha Rao');
+  assert.equal(blocked.record.prospect.profileUrl, 'https://linkedin.com/in/asha-one');
+  assert.equal(blocked.record.list, 'Do not contact');
+  assert.deepEqual(blocked.record.contacts, []);
+  assert.deepEqual(blocked.record.sequence, []);
+
+  const localActive = { ...createRecord({ name: 'Asha Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-one', importedEmail: 'asha@example.com' }, [{ id: 'email', value: 'asha@example.com' }]), saved: true, list: 'Follow up', sequence: [{ status: 'queued' }] };
+  const incomingDnc = { ...createRecord({ name: 'Asha Priya Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-two' }, []), saved: true, list: 'Do not contact' };
+  const applied = upsertRecord([localActive], incomingDnc);
+  assert.equal(applied.suppressionAliasMatched, true);
+  assert.equal(applied.records.length, 1);
+  assert.equal(applied.record.id, localActive.id);
+  assert.equal(applied.record.prospect.name, 'Asha Rao');
+  assert.equal(applied.record.list, 'Do not contact');
+  assert.deepEqual(applied.record.contacts, []);
+  assert.deepEqual(applied.record.sequence, []);
+
+  const distinctActive = upsertRecord([localActive], activeVariant);
+  assert.equal(distinctActive.suppressionAliasMatched, false);
+  assert.equal(distinctActive.records.length, 2);
+});
+
+test('ordinary saves prioritize any DNC alias over a conflicting exact LinkedIn match', () => {
+  const localDnc = { ...createRecord({ name: 'Asha Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha' }, []), saved: true, list: 'Do not contact' };
+  const exactActive = { ...createRecord({ name: 'Bob Smith', domain: 'other.example', profileUrl: 'https://linkedin.com/in/bob' }, [{ id: 'bob-email', value: 'bob@other.example' }]), saved: true, list: 'Follow up', note: 'Keep Bob' };
+  const contradictory = { ...createRecord({ name: 'Asha Priya Rao', domain: 'example.com', profileUrl: 'https://www.linkedin.com/in/bob/', importedEmail: 'asha@example.com' }, [{ id: 'incoming', value: 'asha@example.com' }]), saved: true, list: 'Follow up' };
+  const saved = upsertRecord([exactActive, localDnc], contradictory);
+  assert.equal(saved.suppressionAliasMatched, true);
+  assert.equal(saved.mixedIdentityConflict, true);
+  assert.equal(saved.record.id, localDnc.id);
+  assert.equal(saved.record.list, 'Do not contact');
+  assert.equal(saved.record.prospect.name, 'Asha Rao');
+  assert.deepEqual(saved.record.contacts, []);
+  assert.equal(saved.records.length, 2);
+  assert.deepEqual(saved.records.find(({ id }) => id === exactActive.id), exactActive);
+  assert.equal(saved.records.some(({ prospect }) => prospect.name === 'Asha Priya Rao'), false);
+});
+
 test('exports contact provenance to CSV', () => {
   const record = createRecord({ name: '=WEBSERVICE("https://example.test")', company: 'Example', title: 'Engineer' }, [{ value: 'ada@example.com', contactType: 'work_email', status: 'publicly_found', confidence: 85, sourceUrl: 'https://example.com/contact', retrievedAt: '2026-07-15T00:00:00.000Z' }]);
   const csv = toCsv(record);
@@ -125,7 +192,157 @@ test('exports contact provenance to CSV', () => {
   assert.match(csv, /evidence_snippet/);
   assert.match(csv, /ada@example.com/);
   assert.match(csv, /publicly_found/);
+  assert.match(csv, /domain,profile_url/);
   assert.match(csv, /"'=WEBSERVICE\(""https:\/\/example\.test""\)"/);
+});
+
+test('parses recruiter CSV locally with quoted fields, aliases, provenance, and untrusted claim downgrade', () => {
+  const csv = '\uFEFFfull_name,company_name,job_title,company_domain,linkedin_url,business_email,work_phone,evidence_url,source_note,list,status,confirmed_at\r\n"Asha Rao","Example, Inc","Talent\nLead",example.com,https://www.linkedin.com/in/asha,asha@example.com,"+91 55555 0100",https://example.com/team,"ATS export",Follow up,user_confirmed,2026-07-01';
+  const parsed = parseRecruiterCsv(csv, 'ats-export.csv', '2026-07-19T10:00:00.000Z');
+  assert.equal(parsed.accepted, 1);
+  assert.equal(parsed.rejected, 0);
+  assert.deepEqual(parsed.ignoredColumns, ['status', 'confirmed_at']);
+  const [record] = parsed.records;
+  assert.equal(record.prospect.name, 'Asha Rao');
+  assert.equal(record.prospect.company, 'Example, Inc');
+  assert.equal(record.prospect.title, 'Talent Lead');
+  assert.equal(record.prospect.domain, 'example.com');
+  assert.equal(record.list, 'Follow up');
+  assert.deepEqual(record.contacts.map(({ contactType }) => contactType), ['work_email', 'business_phone']);
+  assert.ok(record.contacts.every((contact) => contact.status === 'recruiter_imported' && contact.contactScope === 'person_candidate' && contact.provider === 'recruiter_csv'));
+  assert.match(record.contacts[0].reason, /ats-export\.csv, row 2/);
+  assert.equal(record.contacts[0].evidenceSnippet, 'ATS export');
+  assert.equal(record.contacts[0].confirmedAt, '');
+  assert.deepEqual(record.importProvenance, { source: 'ats-export.csv', row: 2, importedAt: '2026-07-19T10:00:00.000Z' });
+  assert.equal(draftableEmail(record), undefined);
+});
+
+test('rejects unsafe CSV schemas, malformed files, limits, and invalid work contacts', () => {
+  assert.throws(() => parseRecruiterCsv('name,domain,personal_phone\nAsha Rao,example.com,+15550100'), /Personal-contact columns/);
+  for (const header of ['email', 'phone', 'cell_phone', 'mobile_number', 'home_phone', 'private_email']) assert.throws(() => parseRecruiterCsv(`name,domain,${header}\nAsha Rao,example.com,value`), /Personal-contact columns/);
+  assert.throws(() => parseRecruiterCsv('name,full_name,domain\nAsha Rao,Asha Rao,example.com'), /same field/);
+  assert.throws(() => parseRecruiterCsv('name,domain\n"Asha Rao,example.com'), /unclosed quoted field/);
+  assert.throws(() => parseRecruiterCsv('name,domain\nAsha Rao,example.\uFFFDcom'), /valid UTF-8/);
+  assert.throws(() => parseRecruiterCsv(`name,domain\n${'x'.repeat(1_000_001)}`), /exceeds 1 MB/);
+  const tooMany = ['name,domain', ...Array.from({ length: 1001 }, (_, index) => `Person ${index},example.com`)].join('\n');
+  assert.throws(() => parseRecruiterCsv(tooMany), /more than 1,000/);
+  const parsed = parseRecruiterCsv('name,domain,work_email,business_phone\nAsha Rao,example.com,asha@example.com,+91 55555 0100\nBroken Person,example.com,not-an-email,+91 55555 0100');
+  assert.equal(parsed.accepted, 1);
+  assert.equal(parsed.rejected, 1);
+  assert.match(parsed.issues[0], /work email is invalid/);
+  const generic = parseRecruiterCsv('name,domain,contact,contact_type\nAsha Rao,example.com,+91 55555 0100,business_phone');
+  assert.deepEqual(generic.ignoredColumns, ['contact', 'contact_type']);
+  assert.deepEqual(generic.records[0].contacts, []);
+  for (const phone of ['texttext1234567', 'ext1234567', '+++++++1234567']) {
+    assert.throws(() => parseRecruiterCsv(`name,domain,business_phone\nAsha Rao,example.com,${phone}`), /business phone is invalid/);
+  }
+  assert.throws(() => parseRecruiterCsv('name,domain,profile_url\nAsha Rao,example.com,https://example.com/shared'), /LinkedIn person URL/);
+});
+
+test('requires a suppression-screenable identity and strips contact data from CSV DNC rows', () => {
+  assert.throws(() => parseRecruiterCsv('name,company,profile_url,work_email\nAsha Rao,Example,https:\/\/linkedin.com\/in\/asha,asha@example.com'), /full name and explicit company domain/);
+  const parsed = parseRecruiterCsv('name,domain,work_email,business_phone,list\nAsha Rao,example.com,asha@example.com,+91 55555 0100,Do not contact');
+  assert.equal(parsed.strippedContacts, 1);
+  assert.equal(parsed.records[0].list, 'Do not contact');
+  assert.deepEqual(parsed.records[0].contacts, []);
+  assert.equal(parsed.records[0].prospect.importedEmail, '');
+  assert.equal(parsed.records[0].prospect.importedPhone, '');
+});
+
+test('previews recruiter import without mutating and preserves stronger local context on exact merge', () => {
+  const confirmed = { id: 'confirmed-email', value: 'asha@example.com', contactType: 'work_email', contactScope: 'person_confirmed', status: 'user_confirmed', statusLabel: 'Identity checked by recruiter' };
+  const local = { ...createRecord({ name: 'Asha Rao', company: 'Example', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha' }, [confirmed]), saved: true, list: 'Follow up', note: 'Keep this', sequence: [{ id: 'queued', status: 'queued' }] };
+  const imported = parseRecruiterCsv('name,company,title,domain,profile_url,work_email\nAsha Rao,Example,Talent Lead,example.com,https://www.linkedin.com/in/asha/,ASHA@example.com').records;
+  const before = structuredClone([local]);
+  const preview = mergeRecruiterImport([local], imported);
+  assert.deepEqual([local], before);
+  assert.equal(preview.added, 0);
+  assert.equal(preview.deduplicated, 1);
+  assert.equal(preview.records.length, 1);
+  assert.equal(preview.records[0].contacts.length, 1);
+  assert.equal(preview.records[0].contacts[0].status, 'user_confirmed');
+  assert.equal(preview.records[0].note, 'Keep this');
+  assert.equal(preview.records[0].list, 'Follow up');
+  assert.deepEqual(preview.records[0].sequence, local.sequence);
+});
+
+test('recruiter import keeps local DNC sticky and applies an exact incoming DNC atomically', () => {
+  const blocked = { ...createRecord({ name: 'Asha Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha', importedEmail: 'old@example.com' }, [{ id: 'old', value: 'old@example.com' }]), saved: true, list: 'Do not contact', sequence: [{ status: 'queued' }] };
+  const activeImport = parseRecruiterCsv('name,domain,profile_url,work_email\nAsha Rao,example.com,https://linkedin.com/in/asha,new@example.com').records;
+  const sticky = mergeRecruiterImport([blocked], activeImport);
+  assert.equal(sticky.records[0].list, 'Do not contact');
+  assert.deepEqual(sticky.records[0].contacts, []);
+  assert.deepEqual(sticky.records[0].sequence, []);
+  const active = { ...createRecord({ name: 'Dev Shah', domain: 'example.com', profileUrl: 'https://linkedin.com/in/dev', importedEmail: 'dev@example.com' }, [{ id: 'dev', value: 'dev@example.com' }]), saved: true, list: 'Follow up', sequence: [{ status: 'queued' }] };
+  const dncImport = parseRecruiterCsv('name,domain,profile_url,do_not_contact\nDev Shah,example.com,https://linkedin.com/in/dev,true').records;
+  const applied = mergeRecruiterImport([active], dncImport);
+  assert.equal(applied.doNotContact, 1);
+  assert.equal(applied.removedContacts, 1);
+  assert.equal(applied.records[0].list, 'Do not contact');
+  assert.deepEqual(applied.records[0].contacts, []);
+  assert.deepEqual(applied.records[0].sequence, []);
+});
+
+test('blocks a recruiter import when an ambiguous incoming DNC cannot be safely applied', () => {
+  const local = { ...createRecord({ name: 'Asha Rao', company: 'Example', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-one' }, []), saved: true };
+  const incoming = parseRecruiterCsv('name,company,domain,profile_url,do_not_contact\nAsha Rao,Example,example.com,https://linkedin.com/in/asha-two,true').records;
+  const preview = mergeRecruiterImport([local], incoming);
+  assert.equal(preview.conflicts, 1);
+  assert.equal(preview.blockingConflicts, 1);
+  assert.equal(preview.imported, 0);
+  assert.deepEqual(preview.records, [local]);
+});
+
+test('does not trust a reused LinkedIn URL when the imported person name differs', () => {
+  const victim = { ...createRecord({ name: 'Victim Person', domain: 'victim.example', profileUrl: 'https://linkedin.com/in/shared' }, [{ id: 'confirmed', value: 'victim@victim.example', contactType: 'work_email', contactScope: 'person_confirmed', status: 'user_confirmed' }]), saved: true, sequence: [{ status: 'queued' }] };
+  const malicious = parseRecruiterCsv('name,domain,profile_url,do_not_contact\nDifferent Person,other.example,https://linkedin.com/in/shared,true').records;
+  const preview = mergeRecruiterImport([victim], malicious);
+  assert.equal(preview.imported, 0);
+  assert.equal(preview.blockingConflicts, 1);
+  assert.deepEqual(preview.records, [victim]);
+});
+
+test('blocks incomplete and name-variant collisions whenever either side is DNC', () => {
+  const localDnc = { ...createRecord({ name: 'Asha Rao', company: 'Example' }, []), saved: true, list: 'Do not contact' };
+  const activeImport = parseRecruiterCsv('name,domain,work_email\nAsha Rao,example.com,asha@example.com').records;
+  const incomplete = mergeRecruiterImport([localDnc], activeImport);
+  assert.equal(incomplete.imported, 0);
+  assert.equal(incomplete.blockingConflicts, 1);
+  const localActive = { ...createRecord({ name: 'Asha Rao', domain: 'example.com' }, []), saved: true };
+  const variantDnc = parseRecruiterCsv('name,domain,do_not_contact\nAsha Priya Rao,example.com,true').records;
+  const variant = mergeRecruiterImport([localActive], variantDnc);
+  assert.equal(variant.imported, 0);
+  assert.equal(variant.blockingConflicts, 1);
+  const capturedDnc = { ...createRecord({ name: 'Asha Rao', company: 'Example' }, []), saved: true, list: 'Do not contact' };
+  const domainOnlyVariant = parseRecruiterCsv('name,domain,work_email\nAsha Priya Rao,example.com,asha@example.com').records;
+  const capturedCollision = mergeRecruiterImport([capturedDnc], domainOnlyVariant);
+  assert.equal(capturedCollision.imported, 0);
+  assert.equal(capturedCollision.blockingConflicts, 1);
+});
+
+test('allows clearly distinct same-name people when canonical profile URLs and domains differ', () => {
+  const localDnc = { ...createRecord({ name: 'Alex Lee', domain: 'a.example', profileUrl: 'https://linkedin.com/in/alex-one' }, []), saved: true, list: 'Do not contact' };
+  const incoming = parseRecruiterCsv('name,domain,profile_url,work_email\nAlex Lee,b.example,https://linkedin.com/in/alex-two,alex@b.example').records;
+  const preview = mergeRecruiterImport([localDnc], incoming);
+  assert.equal(preview.imported, 1);
+  assert.equal(preview.blockingConflicts, 0);
+});
+
+test('purges saved records only by the suppression alias that actually matched', () => {
+  const saved = { ...createRecord({ name: 'Asha Priya Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/old', importedEmail: 'asha@example.com' }, [{ value: 'asha@example.com' }]), saved: true, sequence: [{ status: 'queued' }] };
+  const other = { ...createRecord({ name: 'Dev Shah', domain: 'example.com' }, []), saved: true };
+  const purged = purgeSuppressedProspects([saved, other], [{ prospect: { name: 'Asha Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/new' }, matchedPerson: true, matchedLinkedIn: false }]);
+  assert.equal(purged.removed, 1);
+  assert.deepEqual(purged.records, [other]);
+  const victim = { ...createRecord({ name: 'Victim Person', domain: 'victim.example', profileUrl: 'https://linkedin.com/in/victim' }, []), saved: true };
+  const mixed = purgeSuppressedProspects([victim], [{ prospect: { name: 'Asha Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/victim' }, matchedPerson: true, matchedLinkedIn: false }]);
+  assert.equal(mixed.removed, 0);
+  const handle = purgeSuppressedProspects([victim], [{ prospect: { name: 'Different Person', profileUrl: 'https://linkedin.com/in/victim' }, matchedPerson: false, matchedLinkedIn: true }]);
+  assert.equal(handle.removed, 1);
+
+  const legacyUrlDomain = { ...createRecord({ name: 'Asha Rao', domain: 'HTTPS://Example.COM/team', importedEmail: 'asha@example.com' }, [{ value: 'asha@example.com' }]), saved: true, list: 'Follow up', sequence: [{ status: 'queued' }] };
+  const canonicalSignal = [{ prospect: { name: 'Asha Priya Rao', domain: 'example.com' }, matchedPerson: true, matchedLinkedIn: false }];
+  assert.equal(purgeSuppressedProspects([legacyUrlDomain], canonicalSignal).removed, 1);
 });
 
 test('seals and opens a vault payload with AES-GCM', async () => {
@@ -153,7 +370,7 @@ test('exports an encrypted list and sanitizes imported records', async () => {
 });
 
 test('handoff rejects invalid dates instead of replacing them with the current time', async () => {
-  const record = { ...createRecord({ name: 'Asha Rao', company: 'Example' }, [{ id: 'email', value: 'asha@example.com', contactType: 'work_email', contactScope: 'person_attributed', status: 'provider_valid', verifiedAt: 'not-a-date', retrievedAt: 'also-not-a-date' }]), saved: true, list: 'Follow up', createdAt: 'bad-created', updatedAt: 'bad-updated', employmentHistory: [{ company: 'Old Co', detectedAt: 'bad-detected' }] };
+  const record = { ...createRecord({ name: 'Asha Rao', company: 'Example', domain: 'example.com' }, [{ id: 'email', value: 'asha@example.com', contactType: 'work_email', contactScope: 'person_attributed', status: 'provider_valid', verifiedAt: 'not-a-date', retrievedAt: 'also-not-a-date' }]), saved: true, list: 'Follow up', createdAt: 'bad-created', updatedAt: 'bad-updated', employmentHistory: [{ company: 'Old Co', detectedAt: 'bad-detected' }] };
   const opened = await openHandoff((await createHandoff([record], 'separate share passphrase', 'Follow up')).text, 'separate share passphrase');
   assert.equal(opened.records[0].createdAt, '');
   assert.equal(opened.records[0].updatedAt, '');
@@ -163,7 +380,7 @@ test('handoff rejects invalid dates instead of replacing them with the current t
 });
 
 test('handoff exports only the selected list and no unrelated opt-out identities', async () => {
-  const selected = { ...createRecord({ name: 'Asha Rao', company: 'Example' }, []), saved: true, list: 'Follow up' };
+  const selected = { ...createRecord({ name: 'Asha Rao', company: 'Example', domain: 'example.com' }, []), saved: true, list: 'Follow up' };
   const optOut = { ...createRecord({ name: 'Private Opt Out', company: 'Elsewhere' }, []), saved: true, suppressed: true, list: 'Do not contact' };
   const handoff = await createHandoff([selected, optOut], 'separate share passphrase', 'Follow up');
   assert.equal(handoff.count, 1);
@@ -175,8 +392,20 @@ test('handoff exports only the selected list and no unrelated opt-out identities
   assert.deepEqual(opened.records.map(({ prospect }) => prospect.name), ['Asha Rao']);
 });
 
+test('handoff rejects unscreenable active records but permits a selected DNC record', async () => {
+  const legacyActive = { ...createRecord({ name: 'Asha Rao', company: 'Example' }, [{ id: 'email', value: 'asha@example.com', contactType: 'work_email', status: 'user_confirmed', contactScope: 'person_confirmed' }]), saved: true, list: 'Follow up' };
+  await assert.rejects(() => createHandoff([legacyActive], 'separate share passphrase', 'Follow up'), /canonical LinkedIn person URL or a full name and valid company domain/);
+
+  const dnc = { ...legacyActive, contacts: [], list: 'Do not contact', sequence: [] };
+  const bundle = await createHandoff([dnc], 'separate share passphrase', 'Do not contact');
+  const opened = await openHandoff(bundle.text, 'separate share passphrase');
+  assert.equal(opened.records.length, 1);
+  assert.equal(opened.records[0].list, 'Do not contact');
+  assert.deepEqual(opened.records[0].contacts, []);
+});
+
 test('handoff exports are nondeterministic and reject version or cipher tampering', async () => {
-  const record = { ...createRecord({ name: 'Asha Rao', company: 'Example' }, []), saved: true, list: 'Follow up' };
+  const record = { ...createRecord({ name: 'Asha Rao', company: 'Example', domain: 'example.com' }, []), saved: true, list: 'Follow up' };
   const first = JSON.parse((await createHandoff([record], 'separate share passphrase', 'Follow up')).text);
   const second = JSON.parse((await createHandoff([record], 'separate share passphrase', 'Follow up')).text);
   assert.notEqual(first.salt, second.salt);
@@ -190,7 +419,7 @@ test('handoff exports are nondeterministic and reject version or cipher tamperin
 
 test('handoff export rejects a UTF-8 envelope larger than the import limit', async () => {
   const contacts = Array.from({ length: 100 }, (_, index) => ({ value: `person${index}@example.com`, contactType: 'work_email', status: 'provider_valid', reason: 'r'.repeat(1000), evidenceSnippet: 'e'.repeat(1000) }));
-  const records = Array.from({ length: 25 }, (_, index) => ({ ...createRecord({ name: `Person ${index}`, company: 'Example' }, contacts), saved: true, list: 'Follow up' }));
+  const records = Array.from({ length: 25 }, (_, index) => ({ ...createRecord({ name: `Person ${index}`, company: 'Example', domain: 'example.com' }, contacts), saved: true, list: 'Follow up' }));
   await assert.rejects(() => createHandoff(records, 'separate share passphrase', 'Follow up'), /Handoff file exceeds 5 MB/);
 });
 
@@ -240,8 +469,22 @@ test('team import reports ambiguous name and company matches as conflicts', () =
   const shared = { ...createRecord({ name: 'Asha Rao', company: 'Example' }, []), saved: true, note: 'Shared value' };
   const merged = mergeImportedRecords([local], [shared]);
   assert.equal(merged.conflicts, 1);
+  assert.equal(merged.blockingConflicts, 0);
   assert.equal(merged.imported, 0);
   assert.deepEqual(merged.records, [local]);
+});
+
+test('team import exposes an unresolved incoming DNC as a blocking conflict in a mixed handoff', () => {
+  const local = { ...createRecord({ name: 'Asha Rao', company: 'Example', importedEmail: 'asha@example.com' }, [{ id: 'email', value: 'asha@example.com', contactType: 'work_email', status: 'user_confirmed', contactScope: 'person_confirmed' }]), saved: true, list: 'Follow up' };
+  const ambiguousDnc = { ...createRecord({ name: 'Asha Rao', company: 'Example', domain: 'example.com' }, []), saved: true, list: 'Do not contact' };
+  const unrelated = { ...createRecord({ name: 'Dev Shah', company: 'Other', domain: 'other.example', profileUrl: 'https://linkedin.com/in/dev' }, []), saved: true, list: 'Follow up' };
+  const merged = mergeImportedRecords([local], [ambiguousDnc, unrelated]);
+  assert.equal(merged.conflicts, 1);
+  assert.equal(merged.blockingConflicts, 1);
+  assert.equal(merged.imported, 1);
+  assert.equal(merged.records.length, 2);
+  assert.equal(merged.records.find(({ id }) => id === local.id).list, 'Follow up');
+  assert.ok(merged.records.some(({ prospect }) => prospect.name === 'Dev Shah'));
 });
 
 test('team import cannot bypass do-not-contact when only one side has a domain', () => {
@@ -252,6 +495,74 @@ test('team import cannot bypass do-not-contact when only one side has a domain',
   assert.equal(merged.imported, 0);
   assert.deepEqual(merged.records, [local]);
   assert.equal(canContact(merged.records[0]), false);
+});
+
+test('team import applies an exact name-domain DNC even without a LinkedIn URL', () => {
+  const local = { ...createRecord({ name: 'Asha Rao', domain: 'example.com', importedEmail: 'asha@example.com' }, [{ id: 'email', value: 'asha@example.com', contactType: 'work_email', status: 'user_confirmed', contactScope: 'person_confirmed' }]), saved: true, list: 'Follow up', sequence: [{ status: 'queued' }] };
+  const sharedDnc = { ...createRecord({ name: 'Asha Rao', domain: 'example.com' }, []), saved: true, list: 'Do not contact' };
+  const merged = mergeImportedRecords([local], [sharedDnc]);
+  assert.equal(merged.imported, 1);
+  assert.equal(merged.records[0].list, 'Do not contact');
+  assert.deepEqual(merged.records[0].contacts, []);
+  assert.deepEqual(merged.records[0].sequence, []);
+});
+
+test('team import blocks an active middle-name DNC alias and applies the reverse DNC alias', () => {
+  const localDnc = { ...createRecord({ name: 'Asha Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-one' }, []), saved: true, list: 'Do not contact' };
+  const sharedActive = { ...createRecord({ name: 'Asha Priya Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-two' }, [{ id: 'email', value: 'asha@example.com', contactType: 'work_email', status: 'shared_candidate', contactScope: 'person_candidate' }]), saved: true, list: 'Follow up' };
+  const blocked = mergeImportedRecords([localDnc], [sharedActive]);
+  assert.equal(blocked.conflicts, 1);
+  assert.equal(blocked.imported, 0);
+  assert.deepEqual(blocked.records, [localDnc]);
+
+  const localActive = { ...createRecord({ name: 'Asha Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-one', importedEmail: 'asha@example.com' }, [{ id: 'email', value: 'asha@example.com', contactType: 'work_email', status: 'user_confirmed', contactScope: 'person_confirmed' }]), saved: true, list: 'Follow up', sequence: [{ status: 'queued' }] };
+  const sharedDnc = { ...createRecord({ name: 'Asha Priya Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-two' }, []), saved: true, list: 'Do not contact' };
+  const applied = mergeImportedRecords([localActive], [sharedDnc]);
+  assert.equal(applied.conflicts, 0);
+  assert.equal(applied.imported, 1);
+  assert.equal(applied.deduplicated, 1);
+  assert.equal(applied.suppressions, 1);
+  assert.equal(applied.removedContacts, 1);
+  assert.equal(applied.records.length, 1);
+  assert.equal(applied.records[0].id, localActive.id);
+  assert.equal(applied.records[0].prospect.name, 'Asha Rao');
+  assert.equal(applied.records[0].prospect.profileUrl, 'https://linkedin.com/in/asha-one');
+  assert.equal(applied.records[0].list, 'Do not contact');
+  assert.deepEqual(applied.records[0].contacts, []);
+  assert.deepEqual(applied.records[0].sequence, []);
+});
+
+test('team import applies a same-LinkedIn DNC despite identity drift but rejects an active mismatch', () => {
+  const local = { ...createRecord({ name: 'Asha Rao', company: 'Example', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha', importedEmail: 'asha@example.com' }, [{ id: 'email', value: 'asha@example.com', contactType: 'work_email', status: 'user_confirmed', contactScope: 'person_confirmed' }]), saved: true, list: 'Follow up', sequence: [{ status: 'queued' }], note: 'Keep local identity' };
+  const activeMismatch = { ...createRecord({ name: 'Asha Sharma', company: 'Other', domain: 'other.example', profileUrl: 'https://www.linkedin.com/in/asha/' }, []), saved: true, list: 'Follow up' };
+  const blocked = mergeImportedRecords([local], [activeMismatch]);
+  assert.equal(blocked.conflicts, 1);
+  assert.equal(blocked.imported, 0);
+  assert.deepEqual(blocked.records, [local]);
+
+  const incomingDnc = { ...activeMismatch, list: 'Do not contact' };
+  const applied = mergeImportedRecords([local], [incomingDnc]);
+  assert.equal(applied.conflicts, 0);
+  assert.equal(applied.imported, 1);
+  assert.equal(applied.deduplicated, 1);
+  assert.equal(applied.suppressions, 1);
+  assert.equal(applied.removedContacts, 1);
+  assert.equal(applied.records.length, 1);
+  assert.equal(applied.records[0].id, local.id);
+  assert.deepEqual(applied.records[0].prospect, { ...local.prospect, importedEmail: '', importedPhone: '' });
+  assert.equal(applied.records[0].note, 'Keep local identity');
+  assert.equal(applied.records[0].list, 'Do not contact');
+  assert.deepEqual(applied.records[0].contacts, []);
+  assert.deepEqual(applied.records[0].sequence, []);
+});
+
+test('team import keeps middle-name variants distinct while neither record is DNC', () => {
+  const local = { ...createRecord({ name: 'Asha Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-one' }, []), saved: true };
+  const shared = { ...createRecord({ name: 'Asha Priya Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha-two' }, []), saved: true };
+  const merged = mergeImportedRecords([local], [shared]);
+  assert.equal(merged.conflicts, 0);
+  assert.equal(merged.imported, 1);
+  assert.equal(merged.records.length, 2);
 });
 
 test('team import preview does not mutate current records', () => {

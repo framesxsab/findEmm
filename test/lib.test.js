@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
-const { normalizeProspect, extractCompanyContacts, originAllowed, policyAllows, readBody, readLimitedText, robotsPermits, enrich, enrichBatch } = require('../server/lib');
+const { normalizeProspect, extractCompanyContacts, originAllowed, policyAllows, readBody, readLimitedText, robotsPermits, enrich, enrichBatch, screenImportedProspects, rejectSuppressedProspects, withSuppressionRecheck } = require('../server/lib');
 
 function textResponse(body, status = 200, contentType = 'text/plain', length = Buffer.byteLength(body)) {
   return { status, headers: { get: (name) => name.toLowerCase() === 'content-length' ? length : name.toLowerCase() === 'content-type' ? contentType : null }, text: async () => body };
@@ -46,6 +46,68 @@ test('validates every batch prospect before starting enrichment', async () => {
   const provider = { lookup: async () => { lookups += 1; return { contacts: [] }; } };
   await assert.rejects(() => enrichBatch([{ name: 'Ada Lovelace', domain: 'example.com' }, { name: '', domain: 'example.com' }], new Map(), provider), /Name is required/);
   assert.equal(lookups, 0);
+});
+test('screens imported identities locally and reports which durable alias matched', () => {
+  const matched = new Set(['person:asha|rao|example.com']);
+  const store = { has() { throw new Error('single lookup not expected'); }, hasMany(keys) { return keys.map((key) => matched.has(key)); } };
+  assert.deepEqual(screenImportedProspects([{ name: 'Asha Rao', domain: 'example.com', profileUrl: 'https://linkedin.com/in/asha' }, { name: 'Dev Shah', domain: 'example.com' }], store), [
+    { index: 0, checkable: true, suppressed: true, matchedLinkedIn: false, matchedPerson: true, blockedDomain: false },
+    { index: 1, checkable: true, suppressed: false, matchedLinkedIn: false, matchedPerson: false, blockedDomain: false }
+  ]);
+  assert.deepEqual(screenImportedProspects([{ name: 'Asha Rao', profileUrl: 'https://linkedin.com/in/asha' }, { name: 'Single', importedEmail: 'single@example.com' }], store), [
+    { index: 0, checkable: true, suppressed: false, matchedLinkedIn: false, matchedPerson: false, blockedDomain: false },
+    { index: 1, checkable: false, suppressed: false, matchedLinkedIn: false, matchedPerson: false, blockedDomain: false }
+  ]);
+  assert.throws(() => screenImportedProspects([], store), /1–1,000/);
+});
+test('rejects a durable opt-out before disabled-provider research can return recruiter input', () => {
+  const store = { hasMany(keys) { return keys.map((key) => key === 'person:asha|rao|example.com'); }, has() { return false; } };
+  assert.throws(() => rejectSuppressedProspects([{ name: 'Asha Rao', domain: 'example.com', importedEmail: 'asha@example.com' }], store), (error) => error.statusCode === 451 && error.code === 'provider_opt_out');
+});
+test('requires a durable suppression alias before releasing imported contact data', async () => {
+  let enrichments = 0;
+  const store = { has() { return false; }, hasMany(keys) { return keys.map(() => false); } };
+  await assert.rejects(
+    () => withSuppressionRecheck([{ name: 'Single', importedEmail: 'single@example.com' }], store, async () => {
+      enrichments += 1;
+      return [{ value: 'single@example.com' }];
+    }),
+    (error) => error.statusCode === 422 && error.code === 'suppression_alias_required'
+  );
+  assert.equal(enrichments, 0);
+});
+test('rechecks imported contact aliases after asynchronous enrichment', async () => {
+  const prospect = { name: 'Single' };
+  const store = { has() { return false; }, hasMany(keys) { return keys.map(() => false); } };
+  await assert.rejects(
+    () => withSuppressionRecheck([prospect], store, async () => {
+      await Promise.resolve();
+      prospect.importedPhone = '+1 555 0100';
+      return [{ value: prospect.importedPhone }];
+    }),
+    (error) => error.statusCode === 422 && error.code === 'suppression_alias_required'
+  );
+});
+test('rechecks durable opt-outs after asynchronous enrichment before releasing results', async () => {
+  let scans = 0;
+  let enrichments = 0;
+  const store = {
+    has() { return false; },
+    hasMany(keys) {
+      scans += 1;
+      return keys.map((key) => scans === 2 && key === 'person:asha|rao|example.com');
+    }
+  };
+  await assert.rejects(
+    () => withSuppressionRecheck([{ name: 'Asha Rao', domain: 'example.com' }], store, async () => {
+      enrichments += 1;
+      await Promise.resolve();
+      return [{ value: 'asha@example.com' }];
+    }),
+    (error) => error.statusCode === 451 && error.code === 'provider_opt_out'
+  );
+  assert.equal(enrichments, 1);
+  assert.equal(scans, 2);
 });
 test('maps only fresh dated provider validity without claiming person ownership', async () => {
   const now = Date.parse('2026-07-17T00:00:00.000Z');

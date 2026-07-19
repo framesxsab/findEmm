@@ -2,7 +2,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { normalizeProspect, enrich, enrichBatch, originAllowed, readBody, sourceRegistry } = require('./lib');
+const { normalizeProspect, enrich, enrichBatch, screenImportedProspects, withSuppressionRecheck, originAllowed, readBody, sourceRegistry } = require('./lib');
 const { createHunterAdapter } = require('./hunter');
 const { createSuppressionStore } = require('./suppressions');
 
@@ -46,8 +46,9 @@ const server = http.createServer(async (request, response) => {
   try {
     if (request.method === 'GET' && request.url === '/v1/health') return json(response, 200, { status: 'ok', bind: '127.0.0.1', providers: { hunter: hunter.enabled, companyPages: companyPages.enabled } });
     if (request.method === 'GET' && request.url === '/v1/sources') return json(response, 200, { sources: sourceRegistry.map((source) => ({ ...source, enabled: source.id === 'hunter-email-finder' ? hunter.enabled : source.id === 'company-contact-page' ? companyPages.enabled : true })) });
-    if (request.method === 'POST' && request.url === '/v1/enrich') { const { prospect } = await readBody(request); const normalized = normalizeProspect(prospect); return json(response, 200, { prospect: normalized, results: await enrich(normalized, limits, hunter, { companyPages }) }); }
-    if (request.method === 'POST' && request.url === '/v1/batches') { const { prospects } = await readBody(request); const results = await enrichBatch(prospects, limits, hunter, { companyPages }); const id = crypto.randomUUID(); const createdAt = new Date(); pruneBatches(true); batches.set(id, { id, createdAt: createdAt.toISOString(), expiresAt: new Date(createdAt.getTime() + BATCH_TTL_MS).toISOString(), results }); const expiry = setTimeout(() => batches.delete(id), BATCH_TTL_MS); expiry.unref(); return json(response, 201, batches.get(id)); }
+    if (request.method === 'POST' && request.url === '/v1/suppressions/screen') { const { prospects } = await readBody(request, 2_000_000); return json(response, 200, { results: screenImportedProspects(prospects, suppressionStore) }); }
+    if (request.method === 'POST' && request.url === '/v1/enrich') { const { prospect } = await readBody(request); const payload = await withSuppressionRecheck([prospect], suppressionStore, async () => { const normalized = normalizeProspect(prospect); return { prospect: normalized, results: await enrich(normalized, limits, hunter, { companyPages }) }; }); return json(response, 200, payload); }
+    if (request.method === 'POST' && request.url === '/v1/batches') { const { prospects } = await readBody(request); const results = await withSuppressionRecheck(prospects, suppressionStore, () => enrichBatch(prospects, limits, hunter, { companyPages })); const id = crypto.randomUUID(); const createdAt = new Date(); pruneBatches(true); batches.set(id, { id, createdAt: createdAt.toISOString(), expiresAt: new Date(createdAt.getTime() + BATCH_TTL_MS).toISOString(), results }); const expiry = setTimeout(() => batches.delete(id), BATCH_TTL_MS); expiry.unref(); return json(response, 201, batches.get(id)); }
     const batch = request.url.match(/^\/v1\/batches\/([\w-]+)$/); if (request.method === 'GET' && batch) { pruneBatches(); return batches.has(batch[1]) ? json(response, 200, batches.get(batch[1])) : json(response, 404, { error: 'Batch not found. Batches expire after one hour or restart.' }); }
     return json(response, 404, { error: 'Not found' });
   } catch (error) { return json(response, error.statusCode || 400, { error: error.message || 'Request failed', code: error.code || 'request_failed' }); }

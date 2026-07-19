@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const dns = require('node:dns').promises;
 const https = require('node:https');
 const net = require('node:net');
+const { screenProspectSuppressions } = require('./suppressions');
 const PROVIDER_VALIDITY_MS = 90 * 24 * 60 * 60 * 1000;
 const NON_PUBLIC_V4 = new net.BlockList();
 const NON_PUBLIC_V6 = new net.BlockList();
@@ -167,4 +168,25 @@ async function enrichBatch(prospects, limits, provider = null, options = {}) {
   const results = await Promise.all(normalized.map((prospect) => enrich(prospect, limits, provider, options)));
   return newBatch(normalized, results);
 }
-module.exports = { normalizeProspect, extractCompanyContacts, enrich, enrichBatch, newBatch, originAllowed, policyAllows, readBody, readLimitedText, robotsPermits, sourceRegistry };
+function prepareSuppressionScreen(prospects, suppressionStore) {
+  if (!Array.isArray(prospects) || prospects.length < 1 || prospects.length > 1000) throw new Error('Suppression screen requires 1–1,000 prospects.');
+  const normalized = prospects.map(normalizeProspect);
+  return { normalized, results: screenProspectSuppressions(normalized, suppressionStore) };
+}
+function screenImportedProspects(prospects, suppressionStore) {
+  return prepareSuppressionScreen(prospects, suppressionStore).results;
+}
+function rejectSuppressedProspects(prospects, suppressionStore) {
+  const { normalized, results } = prepareSuppressionScreen(prospects, suppressionStore);
+  if (results.some((result, index) => !result.checkable && (normalized[index].importedEmail || normalized[index].importedPhone))) throw Object.assign(new Error('Imported work contact data requires a durable suppression alias: a canonical LinkedIn profile or a full name plus company domain.'), { statusCode: 422, code: 'suppression_alias_required' });
+  if (results.some((result) => result.suppressed)) throw Object.assign(new Error('Provider opt-out received. No identity or contact data may be retained; this lookup is durably suppressed locally.'), { statusCode: 451, code: 'provider_opt_out' });
+  return results;
+}
+async function withSuppressionRecheck(prospects, suppressionStore, task) {
+  if (typeof task !== 'function') throw new TypeError('Suppression-guarded task is required.');
+  rejectSuppressedProspects(prospects, suppressionStore);
+  const result = await task();
+  rejectSuppressedProspects(prospects, suppressionStore);
+  return result;
+}
+module.exports = { normalizeProspect, extractCompanyContacts, enrich, enrichBatch, screenImportedProspects, rejectSuppressedProspects, withSuppressionRecheck, newBatch, originAllowed, policyAllows, readBody, readLimitedText, robotsPermits, sourceRegistry };
