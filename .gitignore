@@ -1,4 +1,6 @@
 server/data/
+.browser-qa-profile/
+.playwright-cli/
 dist/
 release/
 graphify-out/
