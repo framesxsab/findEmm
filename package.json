@@ -6,6 +6,8 @@
   "scripts": {
     "start:server": "node server/index.js",
     "test": "node --test",
+    "precommit": "npm run test && npm run check",
+    "hooks:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-git-hooks.ps1",
     "build": "node scripts/build.js",
     "package:store": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-store.ps1",
     "check": "node --check server/index.js && node --check server/lib.js && node --check server/hunter.js && node --check server/suppressions.js && node --check extension/capture.js && node --check extension/state.js && node --check extension/popup.js && node --check extension/background.js"

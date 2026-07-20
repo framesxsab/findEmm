@@ -60,6 +60,12 @@ npm run check
 npm run build
 ```
 
+Install the repository's pre-commit hook once after cloning. It runs tests and syntax checks before every commit:
+
+```powershell
+npm run hooks:install
+```
+
 To create a Chrome Web Store package, run `npm run package:store`. Maintainer-only publishing instructions live in [`webstore/`](webstore/).
 
 ## Contributing and security

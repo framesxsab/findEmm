@@ -18,6 +18,8 @@ npm run check
 npm run build
 ```
 
+After cloning, run `npm run hooks:install` once. The pre-commit hook runs the test and syntax-check suite before every commit.
+
 ## Project boundaries
 
 - Keep capture user-triggered and limited to visible fields on supported pages.
